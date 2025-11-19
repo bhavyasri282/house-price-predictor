@@ -1,3 +1,5 @@
+# (CODE STARTS — EVERYTHING SAME EXCEPT REMOVED BLOCK)
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -98,6 +100,8 @@ elif st.session_state.page == 2:
     population = st.slider("Block Population:", 100, 10000, 1400)
     ave_occup = st.slider("Avg People per House:", 1.0, 10.0, 3.0, step=0.1)
 
+    plot_size = st.slider("Plot Size (sq yards):", 50, 1500, 200)
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Next"):
@@ -108,6 +112,7 @@ elif st.session_state.page == 2:
                     "AveBedrms": ave_bedrms,
                     "Population": population,
                     "AveOccup": ave_occup,
+                    "PlotSize": plot_size,
                 }
             )
             next_page()
@@ -117,7 +122,7 @@ elif st.session_state.page == 2:
 # ---------- PAGE 3 ----------
 elif st.session_state.page == 3:
     set_bg(
-        "https://images.unsplash.com/photo-1600585154526-990dced4db0d?"
+        "https://images.unsplash.com/photo-1600566753376-2e5c0a1a7f2a?"
         "auto=format&fit=crop&w=1950&q=80"
     )
     st.title("Step 3: Income & Location Details")
@@ -159,48 +164,33 @@ elif st.session_state.page == 4:
     st.json(data)
 
     if st.button("Predict Price"):
-        # ---------- 1. Convert income (lakhs → model units) ----------
-        income_usd = data["IncomeLakhs"] * 100_000 / 84.0      # ₹L → USD
-        medinc_10k = income_usd / 10_000                     # model expects tens of thousands
+        income_usd = data["IncomeLakhs"] * 100_000 / 84.0
+        medinc_10k = income_usd / 10_000
 
-        # ---------- 2. Build feature vector (exact order) ----------
         coords = areas_info[data["Area"]]["coords"]
-        feature_vec = np.array([[
-            medinc_10k,                 # MedInc
-            data["HouseAge"],           # HouseAge
-            data["AveRooms"],           # AveRooms
-            data["AveBedrms"],          # AveBedrms
-            data["Population"],         # Population
-            data["AveOccup"],           # AveOccup
-            coords["lat"],              # Latitude
-            coords["lon"],              # Longitude
-        ]])
+        feature_vec = np.array([[medinc_10k, data["HouseAge"], data["AveRooms"],
+                                 data["AveBedrms"], data["Population"],
+                                 data["AveOccup"], coords["lat"], coords["lon"]]])
 
-        # ---------- 3. Scale & predict ----------
         feature_scaled = scaler.transform(feature_vec)
-        pred = model.predict(feature_scaled)[0]          # in 100k USD
-        price_usd = pred * 100_000
-        price_inr = price_usd * 84.0                     # back to INR
+        pred = model.predict(feature_scaled)[0]
 
-        # ---------- 4. Hyderabad-north scaling ----------
+        price_usd = pred * 100_000
+        price_inr = price_usd * 84.0
+
         price_inr *= areas_info[data["Area"]]["base"]
 
-        # ---- Room / bedroom boost ----
-        price_inr *= (1 + (data["AveRooms"] - 6) * 0.025)   # +2.5 % per extra room
-        price_inr *= (1 + (data["AveBedrms"] - 3) * 0.03)   # +3 % per extra bedroom
+        price_inr *= (1 + (data["AveRooms"] - 6) * 0.025)
+        price_inr *= (1 + (data["AveBedrms"] - 3) * 0.03)
 
-        # ---- Population penalty (dense = cheaper) ----
         price_inr *= (1 - min((data["Population"] - 1400) / 8000, 0.15))
 
-        # ---- Near-road premium ----
         if data.get("NearRoad") == "Yes":
             price_inr *= 1.10
 
-        # ---- Distance penalty ----
         dist = float(data.get("DistanceFromRoad", 0))
         price_inr *= (1 - min(dist / 4000 * 0.12, 0.12))
 
-        # ---- Street premium ----
         street_boosts = {
             "RTC Colony": 1.06, "Sri Nagar Colony": 1.08, "Anjaneya Nagar": 1.05,
             "Rajiv Gandhi Nagar": 1.09, "Venkateshwara Hills": 1.12,
@@ -209,13 +199,15 @@ elif st.session_state.page == 4:
         }
         price_inr *= street_boosts.get(data["Street"].strip(), 1.04)
 
-        # ---------- 5. Final clamp ----------
         price_inr = np.clip(price_inr, 5_000_000, 15_000_000)
+
+        size = data.get("PlotSize", 200)
+        size_factor = 1 + ((size - 200) / 800)
+        price_inr *= size_factor
 
         low  = max(price_inr * 0.92, 5_000_000)
         high = min(price_inr * 1.08, 15_000_000)
 
-        # ---------- 6. Show result ----------
         st.markdown("### Estimated Price Range")
         st.success(f"{data['Street']}, {data['Area']}")
         st.info(f"**Likely Range:** {format_inr(low)} – {format_inr(high)}")
@@ -224,7 +216,6 @@ elif st.session_state.page == 4:
             unsafe_allow_html=True,
         )
 
-        # ---------- 7. Dynamic house image ----------
         if price_inr <= 7_500_000:
             img = "https://images.unsplash.com/photo-1568605117036-5fe57e8e0a96?"
             caption = f"Typical 2-3 BHK in {data['Area']}"
@@ -245,3 +236,188 @@ elif st.session_state.page == 4:
             for k in list(st.session_state.keys()):
                 del st.session_state[k]
             st.rerun()
+
+# ---------- EXTRA FEATURES (Construction, Amenities, EMI, Breakdown, PDF) ----------
+if st.session_state.page == 4:
+    st.markdown("---")
+    st.markdown("## Additional Options (Construction type & Amenities)")
+
+    construction_type = st.selectbox(
+        "Construction Type:",
+        ["Independent House", "Apartment", "Duplex", "Villa"]
+    )
+
+    amenities_list = [
+        "Car Parking", "Modular Kitchen", "Interior Work Done",
+        "Borewell / Manjeera Water", "Solar Panels", "Garden", "Security / Gated Community"
+    ]
+    amenities = st.multiselect("Select available amenities:", amenities_list)
+
+    st.markdown("### EMI Calculator (optional)")
+    with st.expander("Open EMI Calculator"):
+        loan_percent = st.slider("Loan as % of predicted price:", 10, 100, 70)
+        annual_rate = st.number_input("Annual interest rate (%, p.a.):", 6.0, 15.0, 8.5)
+        loan_years = st.slider("Loan tenure (years):", 1, 30, 15)
+
+    st.markdown("### Other utilities")
+    colA, colB = st.columns(2)
+    with colA:
+        if st.button("Recompute & Show All (with new options)"):
+
+            income_usd = st.session_state.data["IncomeLakhs"] * 100_000 / 84.0
+            medinc_10k = income_usd / 10_000
+
+            coords = areas_info[st.session_state.data["Area"]]["coords"]
+            feature_vec = np.array([[medinc_10k,
+                                     st.session_state.data["HouseAge"],
+                                     st.session_state.data["AveRooms"],
+                                     st.session_state.data["AveBedrms"],
+                                     st.session_state.data["Population"],
+                                     st.session_state.data["AveOccup"],
+                                     coords["lat"], coords["lon"]]])
+
+            feature_scaled = scaler.transform(feature_vec)
+            pred = model.predict(feature_scaled)[0]
+
+            price_usd = pred * 100_000
+            base_price_inr = price_usd * 84.0
+
+            price_inr = base_price_inr * areas_info[st.session_state.data["Area"]]["base"]
+
+            rooms_boost = (1 + (st.session_state.data["AveRooms"] - 6) * 0.025)
+            beds_boost = (1 + (st.session_state.data["AveBedrms"] - 3) * 0.03)
+            price_inr *= rooms_boost
+            price_inr *= beds_boost
+
+            pop_penalty = (1 - min((st.session_state.data["Population"] - 1400) / 8000, 0.15))
+            price_inr *= pop_penalty
+
+            near_road_mult = 1.10 if st.session_state.data.get("NearRoad") == "Yes" else 1.0
+            price_inr *= near_road_mult
+
+            dist = float(st.session_state.data.get("DistanceFromRoad", 0))
+            dist_mult = (1 - min(dist / 4000 * 0.12, 0.12))
+            price_inr *= dist_mult
+
+            street_boosts = {
+                "RTC Colony": 1.06, "Sri Nagar Colony": 1.08, "Anjaneya Nagar": 1.05,
+                "Rajiv Gandhi Nagar": 1.09, "Venkateshwara Hills": 1.12,
+                "Teachers Colony": 1.05, "Green Meadows": 1.13,
+                "Godavari Homes": 1.14, "Petbasheerabad": 1.07,
+            }
+            street_mult = street_boosts.get(st.session_state.data["Street"].strip(), 1.04)
+            price_inr *= street_mult
+
+            price_inr = np.clip(price_inr, 5_000_000, 15_000_000)
+
+            size = st.session_state.data.get("PlotSize", 200)
+            size_factor = 1 + ((size - 200) / 800)
+            price_inr *= size_factor
+
+            construction_map = {
+                "Apartment": 0.95,
+                "Independent House": 1.10,
+                "Duplex": 1.15,
+                "Villa": 1.25,
+            }
+            construction_mult = construction_map.get(construction_type, 1.0)
+            price_inr *= construction_mult
+
+            amenities_map = {
+                "Car Parking": 1.03,
+                "Modular Kitchen": 1.04,
+                "Interior Work Done": 1.05,
+                "Borewell / Manjeera Water": 1.02,
+                "Solar Panels": 1.05,
+                "Garden": 1.03,
+                "Security / Gated Community": 1.08,
+            }
+            amenities_mult = 1.0
+            for a in amenities:
+                amenities_mult *= amenities_map.get(a, 1.0)
+            price_inr *= amenities_mult
+
+            price_inr = np.clip(price_inr, 5_000_000, 15_000_000)
+
+            breakdown = []
+            breakdown.append(("Base (model) INR", base_price_inr))
+            breakdown.append(("Area base multiplier", areas_info[st.session_state.data["Area"]]["base"]))
+            breakdown.append(("Rooms boost multiplier", rooms_boost))
+            breakdown.append(("Bedrooms boost multiplier", beds_boost))
+            breakdown.append(("Population penalty multiplier", pop_penalty))
+            breakdown.append(("Near road multiplier", near_road_mult))
+            breakdown.append(("Distance multiplier", dist_mult))
+            breakdown.append(("Street multiplier", street_mult))
+            breakdown.append(("Plot size multiplier", size_factor))
+            breakdown.append(("Construction multiplier", construction_mult))
+            breakdown.append(("Amenities combined multiplier", amenities_mult))
+
+            final_low = max(price_inr * 0.92, 5_000_000)
+            final_high = min(price_inr * 1.08, 15_000_000)
+
+            st.markdown("## Recomputed Estimate (including Construction & Amenities)")
+            st.info(f"**Estimate:** {format_inr(price_inr)}  — Range: {format_inr(final_low)} – {format_inr(final_high)}")
+
+            df_break = pd.DataFrame(breakdown, columns=["Factor", "Value"])
+            def pretty(v):
+                if isinstance(v, (int, float)):
+                    if 0.01 < v < 3.0:
+                        return f"x{v:.3f}"
+                    else:
+                        return format_inr(v)
+                return str(v)
+            df_break["Display"] = df_break["Value"].apply(pretty)
+            st.markdown("### Price Breakdown")
+            st.table(df_break[["Factor", "Display"]])
+
+            st.markdown("### EMI Calculation")
+            loan_amount = price_inr * (loan_percent / 100.0)
+            monthly_rate = annual_rate / 100.0 / 12.0
+            n_months = loan_years * 12
+            if monthly_rate > 0:
+                emi = loan_amount * monthly_rate * (1 + monthly_rate) ** n_months / ((1 + monthly_rate) ** n_months - 1)
+            else:
+                emi = loan_amount / n_months
+
+            st.write(f"Loan amount (approx): {format_inr(loan_amount)}")
+            st.write(f"Monthly EMI (approx): {format_inr(emi)}")
+
+            st.markdown("### Download Simple Report (PDF)")
+            try:
+                from fpdf import FPDF
+                use_fpdf = True
+            except Exception:
+                use_fpdf = False
+
+            report_text_lines = [
+                "House Price Predictor - Simple Report",
+                "------------------------------------",
+                f"Area: {st.session_state.data['Area']}",
+                f"Street: {st.session_state.data.get('Street','')}",
+                f"Construction Type: {construction_type}",
+                f"Amenities: {', '.join(amenities) if amenities else 'None'}",
+                f"Plot Size (sq yards): {st.session_state.data.get('PlotSize', 'NA')}",
+                f"Predicted Price (best): {format_inr(price_inr)}",
+                f"Likely Range: {format_inr(final_low)} - {format_inr(final_high)}",
+                "",
+                "Generated by House Price Predictor",
+            ]
+
+            if use_fpdf:
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial", size=12)
+                for line in report_text_lines:
+                    pdf.cell(0, 8, txt=line, ln=1)
+                pdf_bytes = pdf.output(dest='S').encode('latin-1')
+                st.download_button("Download PDF report", data=pdf_bytes, file_name="house_report.pdf", mime="application/pdf")
+            else:
+                report_text = "\n".join(report_text_lines)
+                st.download_button("Download text report", data=report_text, file_name="house_report.txt", mime="text/plain")
+
+    with colB:
+        if st.button("Reset Additional Options"):
+            st.experimental_rerun()
+
+# (CODE ENDS)
+
