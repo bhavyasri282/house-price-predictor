@@ -1,5 +1,3 @@
-# (CODE STARTS — EVERYTHING SAME EXCEPT REMOVED BLOCK)
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -59,9 +57,52 @@ def format_inr(value: float) -> str:
 
 # initialise session state
 if "page" not in st.session_state:
-    st.session_state.page = 1
+    st.session_state.page = 0   # LOGIN PAGE FIRST
+
 if "data" not in st.session_state:
     st.session_state.data = {}
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# ---------- LOGIN PAGE ----------
+def login_page():
+    st.title("🔐 Login to Continue")
+
+    st.markdown("### Enter Your Details to Proceed")
+    name = st.text_input("Full Name")
+    email = st.text_input("Email Address")
+    phone = st.text_input("Phone (optional)")
+
+    colA, colB = st.columns(2)
+
+    with colA:
+        if st.button("Continue"):
+            if name.strip() == "" or email.strip() == "":
+                st.error("Please enter both Name & Email!")
+            else:
+                st.session_state.user = {
+                    "name": name,
+                    "email": email,
+                    "phone": phone
+                }
+                st.session_state.page = 1
+                st.rerun()
+
+    with colB:
+        if st.button("Continue with Google"):
+            st.session_state.user = {
+                "name": "Google User",
+                "email": "google@login.com",
+                "phone": None
+            }
+            st.session_state.page = 1
+            st.rerun()
+
+# ---------- PAGE 0 ----------
+if st.session_state.page == 0:
+    login_page()
+    st.stop()
 
 # ---------- AREA INFO ----------
 areas_info = {
@@ -78,6 +119,9 @@ if st.session_state.page == 1:
         "auto=format&fit=crop&w=1950&q=80"
     )
     st.title("House Price Predictor")
+
+    st.info(f"Logged in as: **{st.session_state.user['name']}** ({st.session_state.user['email']})")
+
     st.markdown(
         "<h3 style='color:white; text-align:center;'>Step 1: Select Area</h3>",
         unsafe_allow_html=True,
@@ -94,6 +138,9 @@ elif st.session_state.page == 2:
         "auto=format&fit=crop&w=1950&q=80"
     )
     st.title("Step 2: House & Population Details")
+
+    st.info(f"Logged in as: **{st.session_state.user['name']}** ({st.session_state.user['email']})")
+
     house_age = st.slider("House Age (years):", 1, 100, 15)
     ave_rooms = st.slider("Total Rooms:", 3, 20, 6)
     ave_bedrms = st.slider("Bedrooms:", 1, 10, 3)
@@ -126,6 +173,9 @@ elif st.session_state.page == 3:
         "auto=format&fit=crop&w=1950&q=80"
     )
     st.title("Step 3: Income & Location Details")
+
+    st.info(f"Logged in as: **{st.session_state.user['name']}** ({st.session_state.user['email']})")
+
     income_lakhs = st.number_input(
         "Median Annual Household Income (₹ Lakhs):",
         5.0,
@@ -159,6 +209,9 @@ elif st.session_state.page == 4:
         "auto=format&fit=crop&w=1950&q=80"
     )
     st.title("Prediction Result")
+
+    st.info(f"Logged in as: **{st.session_state.user['name']}** ({st.session_state.user['email']})")
+
     data = st.session_state.data
     st.subheader("Your entered details:")
     st.json(data)
@@ -420,4 +473,3 @@ if st.session_state.page == 4:
             st.experimental_rerun()
 
 # (CODE ENDS)
-
